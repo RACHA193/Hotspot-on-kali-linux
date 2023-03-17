@@ -1,4 +1,5 @@
 ---Setting Up Hotspot On kali Linux Machine---
 
 
-> lspci 
+> lspci   (to check the drivers on your device) (if you use usb wireless adapter type command lsusb)
+> 
