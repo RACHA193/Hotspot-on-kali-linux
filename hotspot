@@ -1,5 +1,167 @@
----Setting Up Hotspot On kali Linux Machine---
+---Setting Up Hotspot On kali Linux Machine (root user)---
+
 
 
 > lspci   (to check the drivers on your device) (if you use usb wireless adapter type command lsusb)
-> 
+Now we need to install 2 additional tools to make out hotspot, 1st one is hostapd(hotspot server), 2nd one is dnsmasq(dns dhcp server).
+> apt-get install hostapd 
+> apt-get install dnsmasq
+Stop those services if started already, and prevent them from starting on system start up.
+> service hostapd stop
+> service dnsmasq stop
+> update-rc.d hostapd disable
+> update-rc.d dnsmasq disable
+Now we need to set up config files
+> gedit /etc/dnsmasq.conf
+Add below lines to the config file:
+------------------------------------------------
+# Bind to only one interface
+bind-interfaces
+# Choose interface for binding
+interface=wlan0
+# Specify range of IP addresses for DHCP leasses
+dhcp-range=192.168.150.2,192.168.150.10
+------------------------------------------------
+> gedit /etc/hostapd.conf
+Add below lines to config file:
+------------------------------------------------------------
+# Define interface
+interface=wlan0
+# Select driver
+driver=nl80211
+# Set access point name
+ssid=myhotspot
+# Set access point harware mode to 802.11g
+hw_mode=g
+# Set WIFI channel (can be easily changed)
+channel=6
+# Enable WPA2 only (1 for WPA, 2 for WPA2, 3 for WPA + WPA2)
+wpa=2
+wpa_passphrase=mypassword
+------------------------------------------------------------
+You can change ssid name and password for anything you want here. Current config will create hotspot named myhotspot with password mypassword.
+Open a text editor and add below code and save it as "hotspot.sh" on your desktop.
+----------------------------------------------------------
+#!/bin/bash
+# Start
+# Configure IP address for WLAN
+sudo ifconfig wlan0 192.168.150.1
+# Start DHCP/DNS server
+sudo service dnsmasq restart
+# Enable routing
+sudo sysctl net.ipv4.ip_forward=1
+# Enable NAT
+sudo iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE
+# Run access point daemon
+sudo hostapd /etc/hostapd.conf
+# Stop
+# Disable NAT
+sudo iptables -D POSTROUTING -t nat -o ppp0 -j MASQUERADE
+# Disable routing
+sudo sysctl net.ipv4.ip_forward=0
+# Disable DHCP/DNS server
+sudo service dnsmasq stop
+sudo service hostapd stop
+----------------------------------------------------------
+You will probably need to change ppp0 in this to eth0 or any other netwwork interface which refers to your wired connection.
+> cd /root/Desktop/
+> ./hotspot.sh
+OUTPUT:
+net.ipv4.ip_forward = 1
+wlan0: interface state UNINITIALIZED->ENABLED
+wlan0: AP-ENABLED
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+ERRORS I FACED:
+
+
+1. 
+
+nl80211:Could not configure driver mode
+
+Fix.
+Opened sub-terminal
+> airmon-ng check
+2 processes are running: NetworkManager & wpa_supplicant
+> pkill wpa_supplicant (as it interfears with hotspot interface)
+> airmon-ng check (only NetworkManager process is running)
+Main termianl
+> ./hotspot.sh (error 2)
+
+
+2.
+
+net.ipv4.ip_forward = 1 Line 13: 
+invalid WPA passphrase length 5 (expected 8..63) 
+WPA-PSK enabled, but PSK or passphrase is not configured. 
+2 errors found in configuration file '/etc/hostapd.conf' 
+Failed to set up interface with /etc/hostapd.conf 
+Failed to initialize interface net.ipv4.ip_forward = 0
+
+Fix.
+Opened config file and changed password from 5 characters length to strong 9 characters.
+
+
+3.
+
+nl80211:kernel reports:key not allowed
+Failed to set beacon parameters
+
+Fix.
+Tried downgrading hostapd (didn't worked)
+> nano /etc/NetworkManager/NetworkManager.conf (Found this fix in a blog to persist the fix through reboots)
+Add the following code in NetworkManager.conf file:
+---------------------------------------
+unmanaged-devices=mac:xx:xx:xx:xx:xx:xx
+---------------------------------------
+x's are replaced by your wifi mac-address. Saved and restarted (didn't wworked)
+Read several blogs and tried few fixes (didn't worked)
+Sub-terminal
+> airmon-ng check (found out wpa_supplicant is still running)
+> pkill wpa_supplicant
+Main terminal
+> ./hotspot.sh (still error)
+subterminal 
+> airmon-ng check (still wpa_supplicant is running)
+> pkill wpa_supplicant
+> service wpa_supplicant status (it is disabled but still actively running in the background. It is active - maybe systemd bug)
+Killed the process and restarted the system, problem is still on.
+Need to stop wpa_supplicant 
+> systemctl mask wpa_supplicant.service (disallows all and any attempts to start the wpa_supplicant. When masking a service, the symlinks are moved and 
+then point to /dev/null.)
+> airmon-ng check (wpa_supplicant is stopped, if not pkill it and check again)
+> ./hotspot.sh (finally worked, connected to my phone)
+OUTPUT:
+net.ipv4.ip_forward = 1
+wlan0: interface state UNINITIALIZED->ENABLED
+wlan0: AP-ENABLED 
+wlan0: STA xx:xx:xx:xx:xx:xx IEEE 802.11: authenticated
+wlan0: STA xx:xx:xx:xx:xx:xx IEEE 802.11: associated (aid 1)
+wlan0: AP-STA-CONNECTED xx:xx:xx:xx:xx:xx
+wlan0: STA xx:xx:xx:xx:xx:xx RADIUS: starting accounting session G532429BF60FBB47
+wlan0: STA xx:xx:xx:xx:xx:xx WPA: pairwise key handshake completed (RSN)
+wlan0: EAPOL-4WAY-HS-COMPLETED xx:xx:xx:xx:xx:xx
+
+
+
+
+
+
+
+
+hostapd (hostapd is a user space daemon software enabling a network interface card to act as an access point and authentication server.)
+
+dnsmasq (dnsmasq is a lightweight and simple program which enables issuing DHCP addresses on your network and registering the hostname & IP address in DNS.)
+
+daemon (a program that runs continuously as a background process and wakes up to handle periodic service requests, which often come from remote processes.)
+
+systemd (systemd is a software suite that provides an array of system components for Linux operating systems. The main aim is to unify service configuration
+and behavior across Linux distributions. Its primary component is a "system and service manager" – an init system used to bootstrap user space and manage 
+user processes.)
+
+systemctl (The systemctl command manages both system and service configurations, enabling administrators to manage the OS and control the status of services.)
+
+symlinks (Symbolic links (also called "soft" links) are files that point to a file or directory in your system, but don't mirror the other file's data.)
